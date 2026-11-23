@@ -215,6 +215,9 @@ function setupDepartmentPicker() {
   const input = document.getElementById('departmentInput');
   const options = document.getElementById('departmentOptions');
   options.replaceChildren();
+  const allOption = document.createElement('option');
+  allOption.value = 'Все подразделения';
+  options.appendChild(allOption);
   availableDepartments.forEach(name => {
     const option = document.createElement('option');
     option.value = name;
@@ -228,7 +231,7 @@ function setupDepartmentPicker() {
   } else {
     selectedDepartment = '';
     input.value = '';
-    document.getElementById('departmentHint').textContent = 'Выберите подразделение — затем откройте нужный отчёт.';
+    document.getElementById('departmentHint').textContent = 'Выберите город или «Все подразделения», затем откройте нужный отчёт.';
   }
   input.addEventListener('change', handleDepartmentInput);
 }
@@ -236,6 +239,13 @@ function setupDepartmentPicker() {
 function handleDepartmentInput() {
   const input = document.getElementById('departmentInput');
   const typed = input.value.trim().toLocaleLowerCase('ru');
+  if (typed === 'все подразделения') {
+    selectedDepartment = '__ALL__';
+    input.value = 'Все подразделения';
+    document.getElementById('departmentHint').textContent = 'Выбраны все доступные подразделения. Теперь можно открывать отчёты.';
+    if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
+    return;
+  }
   const match = availableDepartments.find(name => name.toLocaleLowerCase('ru') === typed);
   if (!match) {
     selectedDepartment = '';
@@ -404,7 +414,8 @@ async function loadReport(reportName) {
   reportDiv.innerHTML = '';
   const title = document.createElement('h3');
   title.className = 'report-title';
-  title.textContent = getReportLabel(reportName) + (['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName) ? '' : ' — ' + selectedDepartment);
+  const departmentLabel = selectedDepartment === '__ALL__' ? 'Все подразделения' : selectedDepartment;
+  title.textContent = getReportLabel(reportName) + (['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName) ? '' : ' — ' + departmentLabel);
   const loading = document.createElement('div');
   loading.className = 'loading';
   loading.textContent = 'Загрузка отчёта...';
