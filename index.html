@@ -41,9 +41,10 @@
     .form-field { margin-bottom: 13px; }
     .form-field label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px; }
     .form-field input, .form-field select { width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 5px; font-size: 14px; background: white; }
-    .department-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px; background: #fff; border: 1px solid #ddd; border-radius: 6px; }
-    .department-filter label { font-size: 14px; font-weight: bold; }
-    .department-filter select { min-width: 240px; max-width: 100%; padding: 9px 12px; border: 1px solid #bbb; border-radius: 5px; background: #fff; font-size: 14px; }
+    .department-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0 8px; padding: 12px; background: #f8f9fb; border: 1px solid #ddd; border-radius: 6px; }
+    .department-picker label { font-size: 14px; font-weight: bold; }
+    .department-picker input { min-width: 260px; max-width: 100%; width: 360px; padding: 9px 12px; border: 1px solid #bbb; border-radius: 5px; background: #fff; font-size: 14px; }
+    .department-hint { color: #777; font-size: 12px; width: 100%; }
     .form-hint { color: #777; font-size: 12px; margin-top: 5px; }
     .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .primary-button { background: #263f70; color: white; border-color: #263f70; }
@@ -73,6 +74,13 @@
     <h3>Отчёты</h3>
     <div class="user-info" id="userInfo"></div>
     <button id="adminButton" onclick="toggleAdminPanel()">Администрирование</button>
+
+    <div class="department-picker" id="departmentPicker" style="display:none;">
+      <label for="departmentInput">Подразделение:</label>
+      <input id="departmentInput" list="departmentOptions" placeholder="Начните вводить название города..." autocomplete="off">
+      <datalist id="departmentOptions"></datalist>
+      <div class="department-hint" id="departmentHint">Выберите подразделение — затем откройте нужный отчёт.</div>
+    </div>
 
     <div id="adminPanel">
       <h3>Управление пользователями</h3>
@@ -142,6 +150,7 @@ let activeReportName = '';
 let activeHeaderRows = [];
 let activeRows = [];
 let selectedDepartment = '';
+let availableDepartments = [];
 
 const REPORT_LABELS = {
   'Раздел 1': 'Общая статистика',
@@ -184,6 +193,9 @@ async function handleCredentialResponse(response) {
   try {
     const data = await apiRequest({});
     currentUser = data;
+    const departmentData = await apiRequest({ departments: true });
+    availableDepartments = departmentData.departments || [];
+    setupDepartmentPicker();
     statusDiv.className = 'success';
     statusDiv.textContent = 'Авторизация успешна!';
     document.getElementById('userInfo').textContent =
@@ -195,6 +207,50 @@ async function handleCredentialResponse(response) {
   } catch (err) {
     statusDiv.className = 'error';
     statusDiv.textContent = 'Ошибка: ' + err.message;
+  }
+}
+
+function setupDepartmentPicker() {
+  const picker = document.getElementById('departmentPicker');
+  const input = document.getElementById('departmentInput');
+  const options = document.getElementById('departmentOptions');
+  options.replaceChildren();
+  availableDepartments.forEach(name => {
+    const option = document.createElement('option');
+    option.value = name;
+    options.appendChild(option);
+  });
+  picker.style.display = availableDepartments.length ? 'flex' : 'none';
+  if (availableDepartments.length === 1) {
+    selectedDepartment = availableDepartments[0];
+    input.value = selectedDepartment;
+    document.getElementById('departmentHint').textContent = 'Подразделение выбрано. Теперь можно открывать отчёты.';
+  } else {
+    selectedDepartment = '';
+    input.value = '';
+    document.getElementById('departmentHint').textContent = 'Выберите подразделение — затем откройте нужный отчёт.';
+  }
+  input.addEventListener('change', handleDepartmentInput);
+}
+
+function handleDepartmentInput() {
+  const input = document.getElementById('departmentInput');
+  const typed = input.value.trim().toLocaleLowerCase('ru');
+  const match = availableDepartments.find(name => name.toLocaleLowerCase('ru') === typed);
+  if (!match) {
+    selectedDepartment = '';
+    document.getElementById('departmentHint').textContent = 'Выберите подразделение из предложенного списка.';
+    if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) {
+      document.getElementById('report').replaceChildren();
+      activeReportName = '';
+    }
+    return;
+  }
+  selectedDepartment = match;
+  input.value = match;
+  document.getElementById('departmentHint').textContent = 'Выбрано: ' + match + '. Теперь можно открывать отчёты.';
+  if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) {
+    loadReport(activeReportName);
   }
 }
 
@@ -348,7 +404,7 @@ async function loadReport(reportName) {
   reportDiv.innerHTML = '';
   const title = document.createElement('h3');
   title.className = 'report-title';
-  title.textContent = getReportLabel(reportName);
+  title.textContent = getReportLabel(reportName) + (['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName) ? '' : ' — ' + selectedDepartment);
   const loading = document.createElement('div');
   loading.className = 'loading';
   loading.textContent = 'Загрузка отчёта...';
@@ -361,11 +417,15 @@ async function loadReport(reportName) {
   });
 
   try {
-    const data = await apiRequest({ report: reportName });
+    const isPublicReport = ['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName);
+    if (!isPublicReport && !selectedDepartment) {
+      reportDiv.textContent = 'Сначала выберите подразделение в верхней части страницы.';
+      return;
+    }
+    const data = await apiRequest({ report: reportName, department: isPublicReport ? '' : selectedDepartment });
     activeReportName = reportName;
     activeHeaderRows = data.headerRows || [];
     activeRows = data.rows || [];
-    selectedDepartment = '';
     renderTable(activeHeaderRows, activeRows, reportName);
     if (currentUser && currentUser.role === 'admin' && document.getElementById('adminPanel').style.display === 'block') {
       await loadAdminUsers();
@@ -435,77 +495,10 @@ function getPriceIndexColor(value) {
   return '#800020';
 }
 
-function isCityLabel(value) {
-  const text = String(value || '').trim();
-  return text.indexOf('Максим ') === 0 && text.indexOf('Ф Максим') !== 0;
-}
-
-function getDepartmentNames(rows) {
-  const names = new Set();
-  rows.forEach(row => {
-    const first = String(row[0] || '').trim();
-    if (isCityLabel(first)) names.add(first);
-    const total = first.match(/^Всего\s*\((.+)\)$/);
-    if (total && isCityLabel(total[1].trim())) names.add(total[1].trim());
-  });
-  return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
-}
-
-function filterRowsByDepartment(rows, department) {
-  if (!department) return rows;
-  const result = [];
-  let currentCity = '';
-  rows.forEach(row => {
-    const first = String(row[0] || '').trim();
-    const total = first.match(/^Всего\s*\((.+)\)$/);
-    if (total) {
-      if (total[1].trim() === department) result.push(row);
-      currentCity = '';
-      return;
-    }
-    if (first === 'Итого' || first === 'Всего' || first === 'Всего ()') {
-      currentCity = '';
-      return;
-    }
-    if (isCityLabel(first)) currentCity = first;
-    if (currentCity === department && row.some(cell => String(cell || '').trim() !== '')) result.push(row);
-  });
-  return result;
-}
-
-function changeDepartment(value) {
-  selectedDepartment = value;
-  renderTable(activeHeaderRows, activeRows, activeReportName);
-}
-
 function renderTable(headerRows, rows, reportName) {
   const reportDiv = document.getElementById('report');
   const title = reportDiv.querySelector('.report-title');
-  const departmentNames = getDepartmentNames(rows);
-  let filterPanel = null;
-  if (departmentNames.length) {
-    filterPanel = document.createElement('div');
-    filterPanel.className = 'department-filter';
-    const label = document.createElement('label');
-    label.textContent = 'Подразделение:';
-    const select = document.createElement('select');
-    const allOption = document.createElement('option');
-    allOption.value = '';
-    allOption.textContent = 'Все доступные подразделения';
-    select.appendChild(allOption);
-    departmentNames.forEach(name => {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      select.appendChild(option);
-    });
-    select.value = selectedDepartment;
-    select.addEventListener('change', () => changeDepartment(select.value));
-    label.htmlFor = 'departmentSelect';
-    select.id = 'departmentSelect';
-    filterPanel.append(label, select);
-  }
-  const visibleRows = filterRowsByDepartment(rows, selectedDepartment);
+  const visibleRows = rows;
   const container = document.createElement('div');
   container.className = 'table-container';
   const table = document.createElement('table');
@@ -603,8 +596,7 @@ function renderTable(headerRows, rows, reportName) {
 
   table.append(thead, tbody);
   container.appendChild(table);
-  if (filterPanel) reportDiv.replaceChildren(title, filterPanel, container);
-  else reportDiv.replaceChildren(title, container);
+  reportDiv.replaceChildren(title, container);
 
   let topPosition = 0;
   Array.from(thead.rows).forEach(tr => {
