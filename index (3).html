@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аналитика maxim</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 30px; color: #222; background: #f7f8fa; }
+    h2 { margin-bottom: 20px; }
+    .panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 18px; margin-bottom: 20px; }
+    #status { margin-top: 18px; line-height: 1.6; }
+    .success { color: #16803c; }
+    .error { color: #c62828; }
+    #reports { display: none; }
+    .report-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+    button { border: 1px solid #bbb; background: #fff; border-radius: 5px; padding: 10px 15px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #edf2f7; }
+    button:disabled { opacity: .5; cursor: wait; }
+    button.active { background: #263f70; color: #fff; border-color: #263f70; }
+    #report { margin-top: 20px; }
+    .table-container { overflow: auto; max-height: 75vh; background: #fff; border: 1px solid #ddd; border-radius: 6px; position: relative; isolation: isolate; }
+    table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; table-layout: fixed; font-size: 12px; }
+    th, td { border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    th { background: #e9edf3; font-weight: bold; position: sticky; z-index: 5; }
+    td { background: #fff; }
+    td:first-child { text-align: left; }
+    .sticky-col { position: sticky; z-index: 3; background: #f1f3f6 !important; text-align: left; }
+    th.sticky-col { z-index: 8; background: #dce3ed !important; }
+    tbody tr:nth-child(even) td:not(.sticky-col) { background: #f8f9fb; }
+    tbody tr:hover td { background: #edf3fc; }
+    tbody tr:hover td.sticky-col { background: #e3eaf4 !important; }
+    .loading { padding: 20px; color: #555; }
+    .report-title { margin: 20px 0 12px; }
+    .user-info { color: #555; font-size: 14px; }
+    #adminButton { display: none; margin-top: 15px; background: #263f70; color: white; border-color: #263f70; }
+    #adminPanel { display: none; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 18px; }
+    .admin-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 15px; }
+    .admin-form { border: 1px solid #ddd; border-radius: 7px; padding: 16px; margin: 15px 0; background: #fafbfc; max-width: 650px; }
+    .form-field { margin-bottom: 13px; }
+    .form-field label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px; }
+    .form-field input, .form-field select { width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 5px; font-size: 14px; background: white; }
+    .form-hint { color: #777; font-size: 12px; margin-top: 5px; }
+    .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .primary-button { background: #263f70; color: white; border-color: #263f70; }
+    .danger-button { color: #b42318; border-color: #d9a09b; }
+    .admin-table-wrap { overflow-x: auto; margin-top: 15px; }
+    .admin-table { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: auto; font-size: 13px; }
+    .admin-table th, .admin-table td { position: static; text-align: left; white-space: normal; padding: 9px; background: white; }
+    .admin-table th { background: #e9edf3; }
+    .admin-table td:last-child { white-space: nowrap; }
+    .admin-table button { margin: 2px; padding: 6px 9px; font-size: 12px; }
+    #adminStatus { margin: 10px 0; font-size: 13px; line-height: 1.5; }
+    @media (max-width: 600px) { body { margin: 12px; } .panel { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <h2>Аналитика maxim</h2>
+  <div class="panel">
+    <div id="g_id_onload"
+      data-client_id="405088895649-r0p9j00so0u7lrm31h5mv7rskf5pobfs.apps.googleusercontent.com"
+      data-callback="handleCredentialResponse"></div>
+    <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline"
+      data-text="sign_in_with" data-shape="rectangular"></div>
+    <div id="status"></div>
+  </div>
+
+  <div id="reports" class="panel">
+    <h3>Отчёты</h3>
+    <div class="user-info" id="userInfo"></div>
+    <button id="adminButton" onclick="toggleAdminPanel()">Администрирование</button>
+
+    <div id="adminPanel">
+      <h3>Управление пользователями</h3>
+      <div class="admin-toolbar">
+        <button class="primary-button" onclick="newUser()">+ Добавить пользователя</button>
+        <button onclick="loadAdminUsers()">Обновить список</button>
+      </div>
+      <div id="adminStatus"></div>
+
+      <div class="admin-form" id="userForm" style="display:none;">
+        <h4 id="formTitle">Новый пользователь</h4>
+        <div class="form-field">
+          <label for="userEmail">Google-почта</label>
+          <input type="email" id="userEmail" placeholder="user@gmail.com" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="userFullName">ФИО сотрудника</label>
+          <input type="text" id="userFullName" placeholder="Иванов Иван Иванович" autocomplete="off">
+        </div>
+        <div class="form-field">
+          <label for="userRole">Роль</label>
+          <select id="userRole" onchange="changeRoleFields()">
+            <option value="user">Пользователь</option>
+            <option value="admin">Администратор</option>
+          </select>
+        </div>
+        <div class="form-field" id="citiesField">
+          <label for="userCities">Города через запятую</label>
+          <input type="text" id="userCities" placeholder="Максим Курган, Максим Тюмень" autocomplete="off">
+          <div class="form-hint">Названия должны совпадать с названиями подразделений в сводных таблицах.</div>
+        </div>
+        <div class="admin-actions">
+          <button class="primary-button" id="saveUserButton" onclick="saveUserForm()">Сохранить</button>
+          <button onclick="cancelUserForm()">Отмена</button>
+        </div>
+      </div>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Email</th><th>ФИО сотрудника</th><th>Роль</th><th>Города</th><th>Действия</th></tr></thead>
+          <tbody id="usersTableBody"><tr><td colspan="5">Загрузка...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="report-buttons">
+      <button data-report="Раздел 1" onclick="loadReport('Раздел 1')">Общая статистика</button>
+      <button data-report="Раздел 1.1 (разбивка)" onclick="loadReport('Раздел 1.1 (разбивка)')">Общая статистика с разбивкой</button>
+      <button data-report="Раздел 2" onclick="loadReport('Раздел 2')">По подразделениям и неделям</button>
+      <button data-report="Раздел 3" onclick="loadReport('Раздел 3')">По подразделениям и дням</button>
+      <button data-report="Раздел 4" onclick="loadReport('Раздел 4')">По периодам и неделям</button>
+      <button data-report="Раздел 4 с разбивкой" onclick="loadReport('Раздел 4 с разбивкой')">По периодам и неделям с разбивкой</button>
+      <button data-report="Раздел 5" onclick="loadReport('Раздел 5')">По дистанции и неделям</button>
+      <button data-report="Раздел 5 (с кэф)" onclick="loadReport('Раздел 5 (с кэф)')">По дистанции и неделям (Surge)</button>
+      <button data-report="Раздел 5 по часам" onclick="loadReport('Раздел 5 по часам')">По часам и дистанции</button>
+      <button data-report="Раздел 5 (по часам с кэф)" onclick="loadReport('Раздел 5 (по часам с кэф)')">По часам и дистанции (Surge)</button>
+    </div>
+  </div>
+  <div id="report"></div>
+
+<script>
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX4gHGO68t5fQZj_tbLQx6OEfO990mfWoCqoD_m6-8wKYO3dRS6l5RyQ-XK5sqlyc/exec';
+let currentToken = '';
+let currentUser = null;
+let editingEmail = null;
+
+const REPORT_LABELS = {
+  'Раздел 1': 'Общая статистика',
+  'Раздел 1.1 (разбивка)': 'Общая статистика с разбивкой',
+  'Раздел 2': 'По подразделениям и неделям',
+  'Раздел 3': 'По подразделениям и дням',
+  'Раздел 4': 'По периодам и неделям',
+  'Раздел 4 с разбивкой': 'По периодам и неделям с разбивкой',
+  'Раздел 5': 'По дистанции и неделям',
+  'Раздел 5 (с кэф)': 'По дистанции и неделям (Surge)',
+  'Раздел 5 по часам': 'По часам и дистанции',
+  'Раздел 5 (по часам с кэф)': 'По часам и дистанции (Surge)'
+};
+
+function getReportLabel(name) { return REPORT_LABELS[name] || name; }
+
+async function apiRequest(data) {
+  const response = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ token: currentToken, ...data }),
+    redirect: 'follow'
+  });
+  if (!response.ok) throw new Error('Ошибка сервера: ' + response.status);
+  const result = await response.json();
+  if (!result.success) throw new Error(result.error || 'Ошибка выполнения запроса');
+  return result;
+}
+
+async function handleCredentialResponse(response) {
+  currentToken = response.credential;
+  const statusDiv = document.getElementById('status');
+  statusDiv.className = '';
+  statusDiv.textContent = 'Проверка доступа...';
+  document.getElementById('reports').style.display = 'none';
+  document.getElementById('report').replaceChildren();
+  document.getElementById('adminPanel').style.display = 'none';
+  document.getElementById('adminButton').style.display = 'none';
+
+  try {
+    const data = await apiRequest({});
+    currentUser = data;
+    statusDiv.className = 'success';
+    statusDiv.textContent = 'Авторизация успешна!';
+    document.getElementById('userInfo').textContent =
+      'Пользователь: ' + data.email +
+      (data.fullName ? ' (' + data.fullName + ')' : '') +
+      ' | Роль: ' + (data.role === 'admin' ? 'Администратор' : 'Пользователь');
+    document.getElementById('reports').style.display = 'block';
+    if (data.role === 'admin') document.getElementById('adminButton').style.display = 'inline-block';
+  } catch (err) {
+    statusDiv.className = 'error';
+    statusDiv.textContent = 'Ошибка: ' + err.message;
+  }
+}
+
+function toggleAdminPanel() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+  const panel = document.getElementById('adminPanel');
+  const open = panel.style.display === 'block';
+  panel.style.display = open ? 'none' : 'block';
+  if (!open) loadAdminUsers();
+}
+
+function setAdminStatus(message, type) {
+  const el = document.getElementById('adminStatus');
+  el.className = type || '';
+  el.textContent = message || '';
+}
+
+async function loadAdminUsers() {
+  if (!currentUser || currentUser.role !== 'admin') return;
+  const tbody = document.getElementById('usersTableBody');
+  tbody.innerHTML = '<tr><td colspan="5">Загрузка пользователей...</td></tr>';
+  setAdminStatus('', '');
+  try {
+    const data = await apiRequest({ action: 'listUsers' });
+    renderUsersTable(data.users || []);
+  } catch (error) {
+    tbody.innerHTML = '<tr><td colspan="5">Не удалось загрузить список</td></tr>';
+    setAdminStatus(error.message, 'error');
+  }
+}
+
+
+function renderUsersTable(users) {
+  const tbody = document.getElementById('usersTableBody');
+  tbody.replaceChildren();
+  if (!users.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = 'Пользователей пока нет';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  users.forEach(user => {
+    const tr = document.createElement('tr');
+    const email = document.createElement('td'); email.textContent = user.email;
+    const fullName = document.createElement('td'); fullName.textContent = user.fullName || '';
+    const role = document.createElement('td');
+    role.textContent = user.role === 'admin' ? 'Администратор' : 'Пользователь';
+    const cities = document.createElement('td');
+    cities.textContent = user.role === 'admin' ? 'Все города' : (user.cities || []).join(', ');
+    const actions = document.createElement('td');
+    const edit = document.createElement('button');
+    edit.textContent = 'Изменить'; edit.addEventListener('click', () => editUser(user));
+    const del = document.createElement('button');
+    del.textContent = 'Удалить'; del.className = 'danger-button';
+    del.addEventListener('click', () => removeUser(user.email));
+    actions.append(edit, del);
+    tr.append(email, fullName, role, cities, actions);
+    tbody.appendChild(tr);
+  });
+}
+
+function newUser() {
+  editingEmail = null;
+  document.getElementById('formTitle').textContent = 'Добавление пользователя';
+  document.getElementById('userEmail').value = '';
+  document.getElementById('userEmail').disabled = false;
+  document.getElementById('userFullName').value = '';
+  document.getElementById('userRole').value = 'user';
+  document.getElementById('userCities').value = '';
+  changeRoleFields();
+  document.getElementById('userForm').style.display = 'block';
+  setAdminStatus('', '');
+  document.getElementById('userEmail').focus();
+}
+
+function editUser(user) {
+  editingEmail = user.email;
+  document.getElementById('formTitle').textContent = 'Редактирование пользователя';
+  document.getElementById('userEmail').value = user.email;
+  document.getElementById('userEmail').disabled = true;
+  document.getElementById('userFullName').value = user.fullName || '';
+  document.getElementById('userRole').value = user.role;
+  document.getElementById('userCities').value = (user.cities || []).join(', ');
+  changeRoleFields();
+  document.getElementById('userForm').style.display = 'block';
+  setAdminStatus('', '');
+  document.getElementById('userForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function changeRoleFields() {
+  document.getElementById('citiesField').style.display =
+    document.getElementById('userRole').value === 'admin' ? 'none' : 'block';
+}
+
+function cancelUserForm() {
+  editingEmail = null;
+  document.getElementById('userForm').style.display = 'none';
+  document.getElementById('userEmail').disabled = false;
+  setAdminStatus('', '');
+}
+
+async function saveUserForm() {
+  const email = document.getElementById('userEmail').value.trim();
+  const fullName = document.getElementById('userFullName').value.trim();
+  const role = document.getElementById('userRole').value;
+  const cities = document.getElementById('userCities').value.trim();
+  const button = document.getElementById('saveUserButton');
+
+  if (!email) return setAdminStatus('Укажите email пользователя', 'error');
+  if (!fullName) return setAdminStatus('Укажите ФИО сотрудника', 'error');
+  if (role === 'user' && !cities) return setAdminStatus('Укажите хотя бы один город', 'error');
+
+  button.disabled = true;
+  button.textContent = 'Сохранение...';
+  try {
+    const data = await apiRequest({
+      action: 'saveUser', email: email, fullName: fullName, role: role, cities: cities
+    });
+    setAdminStatus(data.message, 'success');
+    cancelUserForm();
+    await loadAdminUsers();
+  } catch (error) {
+    setAdminStatus(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Сохранить';
+  }
+}
+
+async function removeUser(email) {
+  if (email === currentUser.email) {
+    alert('Нельзя удалить собственную учётную запись.');
+    return;
+  }
+  if (!confirm('Удалить пользователя ' + email + '?')) return;
+  try {
+    const data = await apiRequest({ action: 'deleteUser', email: email });
+    setAdminStatus(data.message, 'success');
+    await loadAdminUsers();
+  } catch (error) {
+    setAdminStatus(error.message, 'error');
+  }
+}
+
+async function loadReport(reportName) {
+  if (!currentToken) { alert('Сначала необходимо авторизоваться'); return; }
+  const reportDiv = document.getElementById('report');
+  reportDiv.innerHTML = '';
+  const title = document.createElement('h3');
+  title.className = 'report-title';
+  title.textContent = getReportLabel(reportName);
+  const loading = document.createElement('div');
+  loading.className = 'loading';
+  loading.textContent = 'Загрузка отчёта...';
+  reportDiv.append(title, loading);
+
+  const buttons = document.querySelectorAll('.report-buttons button');
+  buttons.forEach(button => {
+    button.disabled = true;
+    button.classList.toggle('active', button.dataset.report === reportName);
+  });
+
+  try {
+    const data = await apiRequest({ report: reportName });
+    renderTable(data.headerRows || [], data.rows || [], reportName);
+    if (currentUser && currentUser.role === 'admin' && document.getElementById('adminPanel').style.display === 'block') {
+      await loadAdminUsers();
+    }
+  } catch (err) {
+    reportDiv.textContent = 'Ошибка загрузки: ' + err.message;
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+function getColumnWidths(reportName) {
+  const settings = {
+    'Раздел 1': [85],
+    'Раздел 1.1 (разбивка)': [110],
+    'Раздел 2': [125, 90],
+    'Раздел 3': [125, 90],
+    'Раздел 4': [125, 110, 110],
+    'Раздел 4 с разбивкой': [125, 110, 110],
+    'Раздел 5': [125, 100],
+    'Раздел 5 (с кэф)': [125, 100],
+    'Раздел 5 по часам': [125, 100, 115, 110],
+    'Раздел 5 (по часам с кэф)': [125, 100, 115, 110]
+  };
+  return settings[reportName] || [110, 110, 110, 110];
+}
+
+function getFrozenColumns(reportName) {
+  const settings = {
+    'Раздел 1': 1, 'Раздел 1.1 (разбивка)': 1,
+    'Раздел 2': 2, 'Раздел 3': 2,
+    'Раздел 4': 3, 'Раздел 4 с разбивкой': 3,
+    'Раздел 5': 2, 'Раздел 5 (с кэф)': 2,
+    'Раздел 5 по часам': 4, 'Раздел 5 (по часам с кэф)': 4
+  };
+  return settings[reportName] || 1;
+}
+
+function isColumnEmpty(headerRows, rows, columnIndex) {
+  return headerRows.concat(rows).every(row => String(row[columnIndex] || '').trim() === '');
+}
+
+function normalizeMetricName(value) {
+  return String(value || '').toLowerCase().replace(/\s+/g, '').replace(/[_:]/g, '');
+}
+
+function isPriceIndexName(value) {
+  const name = normalizeMetricName(value);
+  // В разных сводных название метрики может содержать уточнение,
+  // знак процента или находиться не в первой ячейке строки.
+  return name.includes('priceindex');
+}
+
+function getPriceIndexColor(value) {
+  let text = String(value == null ? '' : value)
+    .replace(/\u00a0/g, '')
+    .replace(/\s/g, '')
+    .replace('%', '')
+    .replace(',', '.');
+  const match = text.match(/^[-+]?(?:\d+\.?\d*|\.\d+)/);
+  if (!match) return null;
+  const number = Number(match[0]);
+  if (!Number.isFinite(number)) return null;
+  if (number <= 72) return '#D97706';
+  if (number <= 77) return '#16A34A';
+  if (number < 100) return '#DC2626';
+  return '#800020';
+}
+
+function renderTable(headerRows, rows, reportName) {
+  const reportDiv = document.getElementById('report');
+  const title = reportDiv.querySelector('.report-title');
+  const container = document.createElement('div');
+  container.className = 'table-container';
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const tbody = document.createElement('tbody');
+
+  const columnCount = Math.max(0, ...headerRows.map(row => row.length), ...rows.map(row => row.length));
+  const columnWidths = getColumnWidths(reportName);
+  const frozenColumns = new Set();
+  const baseFrozenCount = getFrozenColumns(reportName);
+  for (let i = 0; i < baseFrozenCount; i++) frozenColumns.add(i);
+
+  const hiddenColumns = new Set();
+  if (reportName === 'Раздел 5') {
+    for (let i = 1; i < columnCount; i++) {
+      if (isColumnEmpty(headerRows, rows, i)) hiddenColumns.add(i);
+    }
+  }
+  hiddenColumns.forEach(index => frozenColumns.delete(index));
+
+  const priceIndexColumns = new Set();
+  headerRows.forEach(row => row.forEach((cell, index) => {
+    if (isPriceIndexName(cell)) priceIndexColumns.add(index);
+  }));
+
+  const widths = [];
+  for (let i = 0; i < columnCount; i++) {
+    widths[i] = hiddenColumns.has(i) ? 0 : (columnWidths[i] || 105);
+  }
+
+  const leftOffsets = {};
+  let leftPosition = 0;
+  for (let i = 0; i < columnCount; i++) {
+    if (frozenColumns.has(i)) {
+      leftOffsets[i] = leftPosition;
+      leftPosition += widths[i];
+    }
+  }
+
+  const colgroup = document.createElement('colgroup');
+  for (let i = 0; i < columnCount; i++) {
+    const col = document.createElement('col');
+    col.style.width = widths[i] + 'px';
+    if (hiddenColumns.has(i)) col.style.display = 'none';
+    colgroup.appendChild(col);
+  }
+  table.appendChild(colgroup);
+
+  headerRows.forEach(row => {
+    const tr = document.createElement('tr');
+    for (let i = 0; i < columnCount; i++) {
+      if (hiddenColumns.has(i)) continue;
+      const th = document.createElement('th');
+      th.textContent = row[i] || '';
+      if (frozenColumns.has(i)) {
+        th.classList.add('sticky-col');
+        th.style.left = leftOffsets[i] + 'px';
+      }
+      tr.appendChild(th);
+    }
+    thead.appendChild(tr);
+  });
+
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    // Ищем подпись PriceIndex во всей строке, а не только в row[0].
+    // Это важно для горизонтальных сводных, где название метрики
+    // может располагаться во второй или последующей колонке.
+    const metricLabelIndex = row.findIndex(cell => isPriceIndexName(cell));
+    const isMetricRow = metricLabelIndex !== -1;
+
+    for (let i = 0; i < columnCount; i++) {
+      if (hiddenColumns.has(i)) continue;
+      const td = document.createElement('td');
+      td.textContent = row[i] || '';
+
+      // Если PriceIndex расположен в строке, окрашиваем всю строку.
+      // Если PriceIndex расположен в заголовке столбца, окрашиваем его значения.
+      if ((isMetricRow && i !== metricLabelIndex) || priceIndexColumns.has(i)) {
+        const color = getPriceIndexColor(row[i]);
+        if (color) {
+          td.style.color = color;
+          td.style.fontWeight = '600';
+        }
+      }
+
+      if (frozenColumns.has(i)) {
+        td.classList.add('sticky-col');
+        td.style.left = leftOffsets[i] + 'px';
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+
+  table.append(thead, tbody);
+  container.appendChild(table);
+  reportDiv.replaceChildren(title, container);
+
+  let topPosition = 0;
+  Array.from(thead.rows).forEach(tr => {
+    const height = tr.getBoundingClientRect().height;
+    tr.querySelectorAll('th').forEach(th => { th.style.top = topPosition + 'px'; });
+    topPosition += height;
+  });
+
+  const info = document.createElement('p');
+  info.className = 'user-info';
+  info.textContent = 'Строк данных: ' + rows.length;
+  reportDiv.appendChild(info);
+}
+</script>
+</body>
+</html>
