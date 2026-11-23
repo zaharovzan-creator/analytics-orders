@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Аналитика maxim</title>
+  <title>Аналитика (заказы) РФ</title>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     * { box-sizing: border-box; }
@@ -60,7 +60,7 @@
   </style>
 </head>
 <body>
-  <h2>Аналитика maxim</h2>
+  <h2>Аналитика (заказы) РФ</h2>
   <div class="panel">
     <div id="g_id_onload"
       data-client_id="405088895649-r0p9j00so0u7lrm31h5mv7rskf5pobfs.apps.googleusercontent.com"
@@ -204,6 +204,10 @@ async function handleCredentialResponse(response) {
       ' | Роль: ' + (data.role === 'admin' ? 'Администратор' : 'Пользователь');
     document.getElementById('reports').style.display = 'block';
     if (data.role === 'admin') document.getElementById('adminButton').style.display = 'inline-block';
+    // Общие отчёты показываем только администраторам.
+    document.querySelectorAll('[data-report="Раздел 1"], [data-report="Раздел 1.1 (разбивка)"]').forEach(button => {
+      button.style.display = data.role === 'admin' ? '' : 'none';
+    });
   } catch (err) {
     statusDiv.className = 'error';
     statusDiv.textContent = 'Ошибка: ' + err.message;
