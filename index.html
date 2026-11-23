@@ -53,6 +53,8 @@
     .department-option:hover, .department-option:focus { background: #edf2f7; outline: none; }
     .department-empty { padding: 10px 12px; color: #777; font-size: 13px; }
     .department-hint { color: #777; font-size: 12px; margin-top: 6px; }
+    .preload-status { display: none; margin: 10px 0 4px; color: #555; font-size: 13px; }
+    .preload-status.visible { display: block; }
     .form-hint { color: #777; font-size: 12px; margin-top: 5px; }
     .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .primary-button { background: #263f70; color: white; border-color: #263f70; }
@@ -137,6 +139,8 @@
       </div>
     </div>
 
+    <div id="preloadStatus" class="preload-status" aria-live="polite"></div>
+
     <div class="report-buttons">
       <button data-report="Раздел 1" onclick="loadReport('Раздел 1')">Общая статистика</button>
       <button data-report="Раздел 1.1 (разбивка)" onclick="loadReport('Раздел 1.1 (разбивка)')">Общая статистика с разбивкой</button>
@@ -163,6 +167,13 @@ let activeRows = [];
 let selectedDepartment = '';
 let availableDepartments = [];
 let allDepartmentOptions = [];
+const CITY_REPORTS = [
+  'Раздел 2', 'Раздел 3', 'Раздел 4', 'Раздел 4 с разбивкой',
+  'Раздел 5', 'Раздел 5 (с кэф)', 'Раздел 5 по часам', 'Раздел 5 (по часам с кэф)'
+];
+const reportCache = new Map();
+const reportRequests = new Map();
+let preloadRunId = 0;
 
 const REPORT_LABELS = {
   'Раздел 1': 'Общая статистика',
@@ -305,7 +316,15 @@ function selectDepartment(item) {
   document.getElementById('departmentSearch').value = item.label;
   document.getElementById('departmentHint').textContent = 'Выбрано: ' + item.label;
   closeDepartmentOptions();
-  if (changed && activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
+  if (changed) {
+    if (item.value === '__ALL__') {
+      preloadRunId++;
+      setPreloadStatus('');
+      if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
+    } else {
+      preloadDepartmentReports(item.value);
+    }
+  }
 }
 
 function onDepartmentInput() {
@@ -316,7 +335,15 @@ function onDepartmentInput() {
     const changed = selectedDepartment !== exact.value;
     selectedDepartment = exact.value;
     document.getElementById('departmentHint').textContent = 'Выбрано: ' + exact.label;
-    if (changed && activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
+    if (changed) {
+      if (exact.value === '__ALL__') {
+        preloadRunId++;
+        setPreloadStatus('');
+        if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
+      } else {
+        preloadDepartmentReports(exact.value);
+      }
+    }
   } else {
     selectedDepartment = '';
     document.getElementById('departmentHint').textContent = 'Выберите подразделение из списка.';
@@ -490,14 +517,103 @@ async function removeUser(email) {
   }
 }
 
+function setPreloadStatus(message) {
+  const el = document.getElementById('preloadStatus');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.toggle('visible', Boolean(message));
+}
+
+function reportCacheKey(department, reportName) {
+  return department + '::' + reportName;
+}
+
+async function fetchCityReport(reportName, department) {
+  const key = reportCacheKey(department, reportName);
+  if (reportCache.has(key)) return reportCache.get(key);
+  if (reportRequests.has(key)) return reportRequests.get(key);
+
+  const request = apiRequest({ report: reportName, department: department })
+    .then(data => {
+      const normalized = { headerRows: data.headerRows || [], rows: data.rows || [] };
+      reportCache.set(key, normalized);
+      return normalized;
+    })
+    .finally(() => reportRequests.delete(key));
+  reportRequests.set(key, request);
+  return request;
+}
+
+async function preloadDepartmentReports(department) {
+  if (!department || department === '__ALL__') return;
+  const runId = ++preloadRunId;
+  const label = department;
+  const total = CITY_REPORTS.length;
+  let completed = CITY_REPORTS.filter(name => reportCache.has(reportCacheKey(department, name))).length;
+
+  if (completed === total) {
+    setPreloadStatus('Все ' + total + ' отчётов для «' + label + '» уже загружены. Переключение между вкладками мгновенное.');
+    if (activeReportName && CITY_REPORTS.includes(activeReportName)) {
+      const cached = reportCache.get(reportCacheKey(department, activeReportName));
+      if (cached && selectedDepartment === department) {
+        activeHeaderRows = cached.headerRows;
+        activeRows = cached.rows;
+        renderTable(activeHeaderRows, activeRows, activeReportName);
+      }
+    }
+    return;
+  }
+
+  setPreloadStatus('Подгружаем отчёты для «' + label + '»: ' + completed + ' из ' + total + '…');
+  if (activeReportName && CITY_REPORTS.includes(activeReportName)) {
+    const reportDiv = document.getElementById('report');
+    const title = document.createElement('h3');
+    title.className = 'report-title';
+    title.textContent = getReportLabel(activeReportName) + ' — ' + label;
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Подготавливаем отчёты для выбранного подразделения…';
+    reportDiv.replaceChildren(title, loading);
+  }
+
+  try {
+    for (const reportName of CITY_REPORTS) {
+      if (runId !== preloadRunId || selectedDepartment !== department) return;
+      const key = reportCacheKey(department, reportName);
+      if (!reportCache.has(key)) await fetchCityReport(reportName, department);
+      completed = CITY_REPORTS.filter(name => reportCache.has(reportCacheKey(department, name))).length;
+      if (runId !== preloadRunId || selectedDepartment !== department) return;
+      setPreloadStatus('Подгружаем отчёты для «' + label + '»: ' + completed + ' из ' + total + '…');
+    }
+
+    if (runId === preloadRunId && selectedDepartment === department) {
+      setPreloadStatus('Все ' + total + ' отчётов для «' + label + '» загружены. Теперь вкладки открываются без ожидания.');
+      if (activeReportName && CITY_REPORTS.includes(activeReportName)) {
+        const cached = reportCache.get(reportCacheKey(department, activeReportName));
+        if (cached) {
+          activeHeaderRows = cached.headerRows;
+          activeRows = cached.rows;
+          renderTable(activeHeaderRows, activeRows, activeReportName);
+        }
+      }
+    }
+  } catch (error) {
+    if (runId === preloadRunId && selectedDepartment === department) {
+      setPreloadStatus('Не удалось загрузить все отчёты: ' + error.message + '. Уже загруженные отчёты останутся доступны.');
+    }
+  }
+}
+
 async function loadReport(reportName) {
   if (!currentToken) { alert('Сначала необходимо авторизоваться'); return; }
   const reportDiv = document.getElementById('report');
   reportDiv.innerHTML = '';
   const title = document.createElement('h3');
   title.className = 'report-title';
-  const departmentLabel = selectedDepartment === '__ALL__' ? 'Все подразделения' : selectedDepartment;
-  title.textContent = getReportLabel(reportName) + (['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName) ? '' : ' — ' + departmentLabel);
+  const isPublicReport = ['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName);
+  const requestedDepartment = selectedDepartment;
+  const departmentLabel = requestedDepartment === '__ALL__' ? 'Все подразделения' : requestedDepartment;
+  title.textContent = getReportLabel(reportName) + (isPublicReport ? '' : ' — ' + departmentLabel);
   const loading = document.createElement('div');
   loading.className = 'loading';
   loading.textContent = 'Загрузка отчёта...';
@@ -510,12 +626,23 @@ async function loadReport(reportName) {
   });
 
   try {
-    const isPublicReport = ['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(reportName);
-    if (!isPublicReport && !selectedDepartment) {
+    if (!isPublicReport && !requestedDepartment) {
       reportDiv.textContent = 'Сначала выберите подразделение в верхней части страницы.';
       return;
     }
-    const data = await apiRequest({ report: reportName, department: isPublicReport ? '' : selectedDepartment });
+
+    let data;
+    if (isPublicReport) {
+      data = await apiRequest({ report: reportName, department: '' });
+      data = { headerRows: data.headerRows || [], rows: data.rows || [] };
+    } else if (requestedDepartment !== '__ALL__') {
+      data = await fetchCityReport(reportName, requestedDepartment);
+    } else {
+      const response = await apiRequest({ report: reportName, department: requestedDepartment });
+      data = { headerRows: response.headerRows || [], rows: response.rows || [] };
+    }
+
+    if (!isPublicReport && requestedDepartment !== selectedDepartment) return;
     activeReportName = reportName;
     activeHeaderRows = data.headerRows || [];
     activeRows = data.rows || [];
@@ -527,6 +654,10 @@ async function loadReport(reportName) {
     reportDiv.textContent = 'Ошибка загрузки: ' + err.message;
   } finally {
     buttons.forEach(button => { button.disabled = false; });
+    // После первой загрузки вкладки фоном подгружаем остальные отчёты этого города.
+    if (!isPublicReport && requestedDepartment && requestedDepartment !== '__ALL__' && requestedDepartment === selectedDepartment) {
+      preloadDepartmentReports(requestedDepartment);
+    }
   }
 }
 
