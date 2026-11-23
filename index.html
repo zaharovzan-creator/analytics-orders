@@ -55,6 +55,8 @@
     .department-hint { color: #777; font-size: 12px; margin-top: 6px; }
     .preload-status { display: none; margin: 10px 0 4px; color: #555; font-size: 13px; }
     .preload-status.visible { display: block; }
+    .preload-control { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: 13px; color: #444; }
+    .preload-control input { width: auto; margin: 0; }
     .form-hint { color: #777; font-size: 12px; margin-top: 5px; }
     .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .primary-button { background: #263f70; color: white; border-color: #263f70; }
@@ -139,6 +141,10 @@
       </div>
     </div>
 
+    <label class="preload-control" id="preloadControl">
+      <input type="checkbox" id="preloadToggle" onchange="onPreloadToggle()">
+      Предзагружать остальные отчёты этого подразделения в фоне
+    </label>
     <div id="preloadStatus" class="preload-status" aria-live="polite"></div>
 
     <div class="report-buttons">
@@ -251,6 +257,7 @@ function setupDepartmentPicker() {
 
   selectedDepartment = allDepartmentOptions[0].value;
   document.getElementById('departmentBox').style.display = 'block';
+  updatePreloadControl();
   document.getElementById('departmentSearch').value = allDepartmentOptions[0].label;
   document.getElementById('departmentHint').textContent = isAdmin
     ? 'Начните вводить название и выберите вариант из списка. Администратор может выбрать все подразделения.'
@@ -317,12 +324,14 @@ function selectDepartment(item) {
   document.getElementById('departmentHint').textContent = 'Выбрано: ' + item.label;
   closeDepartmentOptions();
   if (changed) {
-    if (item.value === '__ALL__') {
-      preloadRunId++;
-      setPreloadStatus('');
-      if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
-    } else {
-      preloadDepartmentReports(item.value);
+    preloadRunId++;
+    setPreloadStatus('');
+    updatePreloadControl();
+    if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) {
+      loadReport(activeReportName);
+      if (item.value !== '__ALL__' && document.getElementById('preloadToggle').checked) {
+        preloadDepartmentReports(item.value);
+      }
     }
   }
 }
@@ -336,16 +345,20 @@ function onDepartmentInput() {
     selectedDepartment = exact.value;
     document.getElementById('departmentHint').textContent = 'Выбрано: ' + exact.label;
     if (changed) {
-      if (exact.value === '__ALL__') {
-        preloadRunId++;
-        setPreloadStatus('');
-        if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) loadReport(activeReportName);
-      } else {
-        preloadDepartmentReports(exact.value);
+      preloadRunId++;
+      setPreloadStatus('');
+      updatePreloadControl();
+      if (activeReportName && !['Раздел 1', 'Раздел 1.1 (разбивка)'].includes(activeReportName)) {
+        loadReport(activeReportName);
+        if (exact.value !== '__ALL__' && document.getElementById('preloadToggle').checked) {
+          preloadDepartmentReports(exact.value);
+        }
       }
     }
   } else {
     selectedDepartment = '';
+    preloadRunId++;
+    setPreloadStatus('');
     document.getElementById('departmentHint').textContent = 'Выберите подразделение из списка.';
   }
   renderDepartmentOptions(input.value);
@@ -517,6 +530,27 @@ async function removeUser(email) {
   }
 }
 
+function updatePreloadControl() {
+  const control = document.getElementById('preloadControl');
+  const toggle = document.getElementById('preloadToggle');
+  if (!control || !toggle) return;
+  const isCitySelected = Boolean(selectedDepartment && selectedDepartment !== '__ALL__');
+  control.style.display = isCitySelected ? 'flex' : 'none';
+  toggle.disabled = !isCitySelected;
+}
+
+function onPreloadToggle() {
+  const toggle = document.getElementById('preloadToggle');
+  if (!toggle.checked) {
+    preloadRunId++;
+    setPreloadStatus('Предзагрузка остановлена. Уже загруженные отчёты сохранены.');
+    return;
+  }
+  if (selectedDepartment && selectedDepartment !== '__ALL__') {
+    preloadDepartmentReports(selectedDepartment);
+  }
+}
+
 function setPreloadStatus(message) {
   const el = document.getElementById('preloadStatus');
   if (!el) return;
@@ -565,17 +599,6 @@ async function preloadDepartmentReports(department) {
   }
 
   setPreloadStatus('Подгружаем отчёты для «' + label + '»: ' + completed + ' из ' + total + '…');
-  if (activeReportName && CITY_REPORTS.includes(activeReportName)) {
-    const reportDiv = document.getElementById('report');
-    const title = document.createElement('h3');
-    title.className = 'report-title';
-    title.textContent = getReportLabel(activeReportName) + ' — ' + label;
-    const loading = document.createElement('div');
-    loading.className = 'loading';
-    loading.textContent = 'Подготавливаем отчёты для выбранного подразделения…';
-    reportDiv.replaceChildren(title, loading);
-  }
-
   try {
     for (const reportName of CITY_REPORTS) {
       if (runId !== preloadRunId || selectedDepartment !== department) return;
@@ -654,10 +677,6 @@ async function loadReport(reportName) {
     reportDiv.textContent = 'Ошибка загрузки: ' + err.message;
   } finally {
     buttons.forEach(button => { button.disabled = false; });
-    // После первой загрузки вкладки фоном подгружаем остальные отчёты этого города.
-    if (!isPublicReport && requestedDepartment && requestedDepartment !== '__ALL__' && requestedDepartment === selectedDepartment) {
-      preloadDepartmentReports(requestedDepartment);
-    }
   }
 }
 
