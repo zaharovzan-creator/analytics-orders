@@ -41,6 +41,9 @@
     .form-field { margin-bottom: 13px; }
     .form-field label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 6px; }
     .form-field input, .form-field select { width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 5px; font-size: 14px; background: white; }
+    .department-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px; background: #fff; border: 1px solid #ddd; border-radius: 6px; }
+    .department-filter label { font-size: 14px; font-weight: bold; }
+    .department-filter select { min-width: 240px; max-width: 100%; padding: 9px 12px; border: 1px solid #bbb; border-radius: 5px; background: #fff; font-size: 14px; }
     .form-hint { color: #777; font-size: 12px; margin-top: 5px; }
     .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .primary-button { background: #263f70; color: white; border-color: #263f70; }
@@ -135,6 +138,10 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX4gHGO68t5fQZ
 let currentToken = '';
 let currentUser = null;
 let editingEmail = null;
+let activeReportName = '';
+let activeHeaderRows = [];
+let activeRows = [];
+let selectedDepartment = '';
 
 const REPORT_LABELS = {
   'Раздел 1': 'Общая статистика',
@@ -355,7 +362,11 @@ async function loadReport(reportName) {
 
   try {
     const data = await apiRequest({ report: reportName });
-    renderTable(data.headerRows || [], data.rows || [], reportName);
+    activeReportName = reportName;
+    activeHeaderRows = data.headerRows || [];
+    activeRows = data.rows || [];
+    selectedDepartment = '';
+    renderTable(activeHeaderRows, activeRows, reportName);
     if (currentUser && currentUser.role === 'admin' && document.getElementById('adminPanel').style.display === 'block') {
       await loadAdminUsers();
     }
@@ -424,16 +435,84 @@ function getPriceIndexColor(value) {
   return '#800020';
 }
 
+function isCityLabel(value) {
+  const text = String(value || '').trim();
+  return text.indexOf('Максим ') === 0 && text.indexOf('Ф Максим') !== 0;
+}
+
+function getDepartmentNames(rows) {
+  const names = new Set();
+  rows.forEach(row => {
+    const first = String(row[0] || '').trim();
+    if (isCityLabel(first)) names.add(first);
+    const total = first.match(/^Всего\s*\((.+)\)$/);
+    if (total && isCityLabel(total[1].trim())) names.add(total[1].trim());
+  });
+  return Array.from(names).sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+function filterRowsByDepartment(rows, department) {
+  if (!department) return rows;
+  const result = [];
+  let currentCity = '';
+  rows.forEach(row => {
+    const first = String(row[0] || '').trim();
+    const total = first.match(/^Всего\s*\((.+)\)$/);
+    if (total) {
+      if (total[1].trim() === department) result.push(row);
+      currentCity = '';
+      return;
+    }
+    if (first === 'Итого' || first === 'Всего' || first === 'Всего ()') {
+      currentCity = '';
+      return;
+    }
+    if (isCityLabel(first)) currentCity = first;
+    if (currentCity === department && row.some(cell => String(cell || '').trim() !== '')) result.push(row);
+  });
+  return result;
+}
+
+function changeDepartment(value) {
+  selectedDepartment = value;
+  renderTable(activeHeaderRows, activeRows, activeReportName);
+}
+
 function renderTable(headerRows, rows, reportName) {
   const reportDiv = document.getElementById('report');
   const title = reportDiv.querySelector('.report-title');
+  const departmentNames = getDepartmentNames(rows);
+  let filterPanel = null;
+  if (departmentNames.length) {
+    filterPanel = document.createElement('div');
+    filterPanel.className = 'department-filter';
+    const label = document.createElement('label');
+    label.textContent = 'Подразделение:';
+    const select = document.createElement('select');
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = 'Все доступные подразделения';
+    select.appendChild(allOption);
+    departmentNames.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+    select.value = selectedDepartment;
+    select.addEventListener('change', () => changeDepartment(select.value));
+    label.htmlFor = 'departmentSelect';
+    select.id = 'departmentSelect';
+    filterPanel.append(label, select);
+  }
+  const visibleRows = filterRowsByDepartment(rows, selectedDepartment);
   const container = document.createElement('div');
   container.className = 'table-container';
   const table = document.createElement('table');
   const thead = document.createElement('thead');
   const tbody = document.createElement('tbody');
 
-  const columnCount = Math.max(0, ...headerRows.map(row => row.length), ...rows.map(row => row.length));
+  const columnCount = Math.max(0, ...headerRows.map(row => row.length), ...visibleRows.map(row => row.length));
   const columnWidths = getColumnWidths(reportName);
   const frozenColumns = new Set();
   const baseFrozenCount = getFrozenColumns(reportName);
@@ -442,7 +521,7 @@ function renderTable(headerRows, rows, reportName) {
   const hiddenColumns = new Set();
   if (reportName === 'Раздел 5') {
     for (let i = 1; i < columnCount; i++) {
-      if (isColumnEmpty(headerRows, rows, i)) hiddenColumns.add(i);
+      if (isColumnEmpty(headerRows, visibleRows, i)) hiddenColumns.add(i);
     }
   }
   hiddenColumns.forEach(index => frozenColumns.delete(index));
@@ -490,7 +569,7 @@ function renderTable(headerRows, rows, reportName) {
     thead.appendChild(tr);
   });
 
-  rows.forEach(row => {
+  visibleRows.forEach(row => {
     const tr = document.createElement('tr');
     // Ищем подпись PriceIndex во всей строке, а не только в row[0].
     // Это важно для горизонтальных сводных, где название метрики
@@ -524,7 +603,8 @@ function renderTable(headerRows, rows, reportName) {
 
   table.append(thead, tbody);
   container.appendChild(table);
-  reportDiv.replaceChildren(title, container);
+  if (filterPanel) reportDiv.replaceChildren(title, filterPanel, container);
+  else reportDiv.replaceChildren(title, container);
 
   let topPosition = 0;
   Array.from(thead.rows).forEach(tr => {
@@ -535,7 +615,7 @@ function renderTable(headerRows, rows, reportName) {
 
   const info = document.createElement('p');
   info.className = 'user-info';
-  info.textContent = 'Строк данных: ' + rows.length;
+  info.textContent = 'Строк данных: ' + visibleRows.length;
   reportDiv.appendChild(info);
 }
 </script>
